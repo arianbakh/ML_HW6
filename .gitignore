@@ -1,4 +1,8 @@
-output.png
+binary.png
+bipolar.png
+modified.png
+v.npy
+w.npy
 
 # Numerous always-ignore extensions
 *.backup

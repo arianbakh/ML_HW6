@@ -7,13 +7,14 @@ from matplotlib import pyplot as plt
 
 # Directory Settings
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
-OUTPUT_PATH = os.path.join(BASE_DIR, 'output.png')
+V_PATH = os.path.join(BASE_DIR, 'v')
+W_PATH = os.path.join(BASE_DIR, 'w')
 
 
 # Algorithm Parameters
 ALPHA = 0.02
 ERROR_THRESHOLD = 0.05
-HIDDEN_LAYER_SIZE = 4
+HIDDEN_LAYER_SIZE = 5  # extra one for bias
 
 
 BINARY_MODE = 'binary'
@@ -33,7 +34,7 @@ def _get_pairs(mode):
     target_vectors = []
     for i in [0, 1]:
         for j in [0, 1]:
-            input_vectors.append([i, j])
+            input_vectors.append([1, i, j])  # including bias
             if i != j:  # XOR is True
                 if mode == BINARY_MODE or mode == BIPOLAR_MODE:
                     target_vectors.append([1])
@@ -49,72 +50,94 @@ def _get_pairs(mode):
     return np.array(input_vectors), np.array(target_vectors)
 
 
-def _init_hidden_weight_matrix(input_vectors):
-    return np.random.rand(input_vectors.shape[1] + 1, HIDDEN_LAYER_SIZE) - 0.5  # +1 is for bias
+def _init_v(input_vectors):
+    if os.path.exists(V_PATH):
+        return np.load(V_PATH)
+    else:
+        v = np.random.rand(input_vectors.shape[1], HIDDEN_LAYER_SIZE) - 0.5
+        np.save(V_PATH, v)
+        return v
 
 
-def _init_output_weight_matrix(target_vectors):
-    return np.random.rand(HIDDEN_LAYER_SIZE, target_vectors.shape[1]) - 0.5
+def _init_w(target_vectors):
+    if os.path.exists(W_PATH):
+        return np.load(W_PATH)
+    else:
+        w = np.random.rand(HIDDEN_LAYER_SIZE, target_vectors.shape[1]) - 0.5
+        np.save(W_PATH, w)
+        return w
 
 
 def _train(input_vectors, target_vectors, mode):
     errors = []
 
-    hidden_weight_matrix = _init_hidden_weight_matrix(input_vectors)
-    output_weight_matrix = _init_output_weight_matrix(target_vectors)
+    v = _init_v(input_vectors)
+    w = _init_w(target_vectors)
 
+    epoch = 0
     total_squared_error = ERROR_THRESHOLD + 1
     while total_squared_error > ERROR_THRESHOLD:
+        epoch += 1
         total_squared_error = 0
-        for i in range(len(input_vectors)):
-            # feedforward
-            biased_input = np.insert(input_vectors[i], 0, 1)
+
+        for i in range(input_vectors.shape[0]):
+            # feed forward
+            x = np.reshape(input_vectors[i], (1, input_vectors[i].shape[0]))
             z_in = np.matmul(
-                np.reshape(biased_input, (1, biased_input.shape[0])),
-                hidden_weight_matrix
+                x,
+                v
             )
             if mode == BINARY_MODE:
                 z = _binary_sigmoid(z_in)
             else:
                 z = _bipolar_sigmoid(z_in)
-            y_in = np.matmul(z, output_weight_matrix)
+            z[0, 0] = 1  # bias
+            y_in = np.matmul(
+                z,
+                w
+            )
             if mode == BINARY_MODE:
                 y = _binary_sigmoid(y_in)
             else:
                 y = _bipolar_sigmoid(y_in)
 
-            # add error
+            # error calculation
             for j in range(y.shape[0]):
                 total_squared_error += (y[j] - target_vectors[i, j]) ** 2
 
-            # backpropagation
+            # back propagation
             if mode == BINARY_MODE:
                 output_sigma = (target_vectors[i] - y) * _binary_sigmoid_derivative(y_in)
             else:
                 output_sigma = (target_vectors[i] - y) * _bipolar_sigmoid_derivative(y_in)
-            output_weight_delta = ALPHA * np.matmul(
+            delta_w = ALPHA * np.matmul(
                 z.T,
                 output_sigma
             )
             hidden_sigma_in = np.matmul(
                 output_sigma,
-                output_weight_matrix.T
+                w.T
             )
             if mode == BINARY_MODE:
                 hidden_sigma = hidden_sigma_in * _binary_sigmoid_derivative(z_in)
             else:
                 hidden_sigma = hidden_sigma_in * _bipolar_sigmoid_derivative(z_in)
-            hidden_weight_delta = np.matmul(
-                np.reshape(biased_input, (biased_input.shape[0], 1)),
+            delta_v = ALPHA * np.matmul(
+                x.T,
                 hidden_sigma
             )
 
             # update weights
-            output_weight_matrix += output_weight_delta
-            hidden_weight_matrix += hidden_weight_delta
+            w += delta_w
+            v += delta_v
 
-        print(total_squared_error)  # TODO remove
+        if epoch % 10 == 0:
+            sys.stdout.write('\rEpoch %d: Error %f' % (epoch, total_squared_error))
+            sys.stdout.flush()
+
         errors.append(total_squared_error)
+
+    print()  # newline
 
     return errors
 
@@ -122,7 +145,8 @@ def _train(input_vectors, target_vectors, mode):
 def run(mode):
     input_vectors, target_vectors = _get_pairs(mode)
     errors = _train(input_vectors, target_vectors, mode)
-    print(len(errors))  # TODO
+    plt.plot(errors)
+    plt.savefig(os.path.join(BASE_DIR, '%s.png' % mode))
 
 
 if __name__ == '__main__':
